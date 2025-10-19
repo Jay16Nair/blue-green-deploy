@@ -2,8 +2,8 @@ pipeline {
     agent any
 
     environment {
-        DOCKERHUB_CREDENTIALS = credentials('dockerhub')  // Add in Jenkins
-        KUBECONFIG_CREDENTIALS = credentials('kubeconfig-id')  // Optional if using Docker Desktop
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub')  
+        KUBECONFIG_CREDENTIALS = credentials('kubeconfig-id')  
         DOCKER_IMAGE = "jay16nair/blue-green-demo"
     }
 
@@ -17,19 +17,22 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    def color = sh(script: "kubectl get svc myapp-service -o jsonpath='{.spec.selector.version}' || echo blue", returnStdout: true).trim()
+                    // Get current live version (blue or green)
+                    def color = bat(script: 'kubectl get svc myapp-service -o jsonpath="{.spec.selector.version}" || echo blue', returnStdout: true).trim()
                     def newColor = color == "blue" ? "green" : "blue"
                     env.NEW_COLOR = newColor
 
-                    sh "docker build -t ${DOCKER_IMAGE}:${newColor} --build-arg APP_COLOR=${newColor} ."
+                    // Build Docker image
+                    bat "docker build -t ${DOCKER_IMAGE}:${newColor} --build-arg APP_COLOR=${newColor} ."
                 }
             }
         }
 
         stage('Push Docker Image') {
             steps {
-                sh """
-                    echo "${DOCKERHUB_CREDENTIALS_PSW}" | docker login -u "${DOCKERHUB_CREDENTIALS_USR}" --password-stdin
+                // Login and push to Docker Hub
+                bat """
+                    docker login -u ${DOCKERHUB_CREDENTIALS_USR} -p ${DOCKERHUB_CREDENTIALS_PSW}
                     docker push ${DOCKER_IMAGE}:${NEW_COLOR}
                 """
             }
@@ -38,7 +41,7 @@ pipeline {
         stage('Deploy New Version') {
             steps {
                 script {
-                    sh "kubectl apply -f k8s-${NEW_COLOR}.yaml"
+                    bat "kubectl apply -f k8s-${NEW_COLOR}.yaml"
                 }
             }
         }
@@ -46,7 +49,7 @@ pipeline {
         stage('Switch Traffic') {
             steps {
                 script {
-                    sh "kubectl patch service myapp-service -p '{\"spec\":{\"selector\":{\"app\":\"myapp\",\"version\":\"${NEW_COLOR}\"}}}'"
+                    bat "kubectl patch service myapp-service -p \"{\\\"spec\\\":{\\\"selector\\\":{\\\"app\\\":\\\"myapp\\\",\\\"version\\\":\\\"${NEW_COLOR}\\\"}}}\""
                 }
             }
         }
@@ -55,7 +58,7 @@ pipeline {
             steps {
                 script {
                     def oldColor = env.NEW_COLOR == "blue" ? "green" : "blue"
-                    sh "kubectl delete deployment ${oldColor}-deployment --ignore-not-found=true"
+                    bat "kubectl delete deployment ${oldColor}-deployment --ignore-not-found=true"
                 }
             }
         }
